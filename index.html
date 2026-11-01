@@ -31,7 +31,7 @@
 .act:disabled{cursor:default}
 .act:disabled:not(.on){opacity:.35}
 .locked{font-size:12px;color:var(--muted)}
-.cookie{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:25;max-width:560px;margin:0 auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 30px rgba(10,14,20,.18);padding:16px;display:flex;flex-direction:column;gap:12px}
+.cookie{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:45;max-width:560px;margin:0 auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 30px rgba(10,14,20,.18);padding:16px;display:flex;flex-direction:column;gap:12px}
 .cookie p{margin:0;font-size:14px}
 .cookie .row{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 .filerow{display:flex;gap:8px;flex-wrap:wrap}
@@ -82,10 +82,21 @@ input[type=text]{flex:1;min-width:0;font:inherit;padding:8px 10px;border-radius:
 .toggle{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .toggle small{display:block;color:var(--muted);font-size:12px}
 .hint{font-size:12px;color:var(--muted);margin:0}
-.toasts{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:30;display:flex;flex-direction:column;gap:8px;width:min(420px,calc(100% - 32px))}
+.toasts{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:50;display:flex;flex-direction:column;gap:8px;width:min(420px,calc(100% - 32px))}
 .toast{background:var(--ink);color:var(--bg);padding:10px 14px;border-radius:10px;font-size:14px;box-shadow:var(--shadow)}
 @media (prefers-reduced-motion:no-preference){.toast{animation:in .2s ease-out}@keyframes in{from{transform:translateY(8px);opacity:.4}}}
 @media (max-width:520px){.actions{width:100%}.act{flex:1;min-width:0}}
+/* användarval */
+.picker{position:fixed;inset:0;z-index:40;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:24px}
+.picker h2{margin:0;font-size:26px;font-weight:700;letter-spacing:-.01em;text-align:center}
+.picker p{margin:0;color:var(--muted);text-align:center}
+.picker .who{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;width:min(520px,100%)}
+.picker .who button{flex:1;min-width:180px;padding:28px 16px;font-size:22px;font-weight:700;border-radius:14px;box-shadow:var(--shadow)}
+.picker .who button small{display:block;font-size:13px;font-weight:400;color:var(--muted);margin-top:4px}
+.userbtn{font-size:13px;padding:2px 10px;border-radius:999px;margin-top:2px;align-self:flex-start;font-weight:600}
+.userrow{display:flex;gap:8px}
+.userrow button{flex:1}
+.userrow button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
 </style>
 </head><body>
 
@@ -94,6 +105,7 @@ input[type=text]{flex:1;min-width:0;font:inherit;padding:8px 10px;border-radius:
     <div class="brand">
       <h1>Vanekurvan</h1>
       <span class="clock mono" id="clock">--:--:--</span>
+      <button class="userbtn" id="userBtn" title="Byt användare">–</button>
     </div>
     <div class="countdown"><small>Ny dag om</small><span class="num" id="left">--:--:--</span></div>
     <button class="btn-primary" id="menuBtn" aria-expanded="false" aria-controls="drawer">Meny</button>
@@ -108,6 +120,15 @@ input[type=text]{flex:1;min-width:0;font:inherit;padding:8px 10px;border-radius:
   <div class="drawer-head">
     <h3>Meny</h3>
     <button id="closeBtn">Stäng</button>
+  </div>
+
+  <div class="sect">
+    <span class="sect-label">Användare</span>
+    <div class="userrow">
+      <button data-user="oliver">Oliver</button>
+      <button data-user="axel">Axel</button>
+    </div>
+    <p class="hint">Oliver och Axel har var sina grafer och svar.</p>
   </div>
 
   <div class="sect">
@@ -159,21 +180,55 @@ input[type=text]{flex:1;min-width:0;font:inherit;padding:8px 10px;border-radius:
   </div>
 </div>
 
+<div class="picker" id="picker" role="dialog" aria-label="Välj användare">
+  <h2>Vem är det?</h2>
+  <p>Välj vem som ska använda Vanekurvan.</p>
+  <div class="who">
+    <button data-user="oliver">Oliver<small id="sub-oliver"></small></button>
+    <button data-user="axel">Axel<small id="sub-axel"></small></button>
+  </div>
+</div>
+
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
 <script>
 (function(){
-const KEY = 'vanekurvan-v1';
+const OLD_KEY = 'vanekurvan-v1';
+const USERS = { oliver:'Oliver', axel:'Axel' };
 const HOUR = 3600000;
 const $ = id => document.getElementById(id);
+const keyFor = u => 'vanekurvan-v1-' + u;
 
-let state = load();
+let user = null;
+let state = null;
 function periodLen(){ return state.fast ? 60000 : 24*HOUR; }
 
-/* ---------- lagring ---------- */
-function load(){
+/* ---------- användare ---------- */
+function chooseUser(u){
+  if(!USERS[u]) return;
+  if(state && user) save();
+  // gammal data från före användarvalet flyttas till den som väljs först
   try{
-    const raw = localStorage.getItem(KEY);
+    const old = localStorage.getItem(OLD_KEY);
+    if(old && !localStorage.getItem(keyFor(u))){ localStorage.setItem(keyFor(u), old); localStorage.removeItem(OLD_KEY); }
+  }catch(e){}
+  user = u; state = load(u);
+  $('picker').hidden = true; openMenu(false);
+  render(); toast('Inloggad som ' + USERS[u]);
+}
+function showPicker(){
+  for(const u in USERS){
+    let n = null;
+    try{ const s = JSON.parse(localStorage.getItem(keyFor(u))); if(s && Array.isArray(s.habits)) n = s.habits.length; }catch(e){}
+    $('sub-'+u).textContent = n === null ? 'Ny' : n + (n===1?' graf':' grafer');
+  }
+  openMenu(false); $('picker').hidden = false;
+}
+
+/* ---------- lagring ---------- */
+function load(u){
+  try{
+    const raw = localStorage.getItem(keyFor(u));
     if(raw){
       const s = JSON.parse(raw);
       if(s && Array.isArray(s.habits)){
@@ -184,7 +239,7 @@ function load(){
   }catch(e){}
   return seed();
 }
-function save(){ if(consent() !== 'yes') return; try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} }
+function save(){ if(consent() !== 'yes' || !user || !state) return; try{ localStorage.setItem(keyFor(user), JSON.stringify(state)); }catch(e){} }
 
 /* ---------- cookies ---------- */
 function consent(){
@@ -194,19 +249,20 @@ function consent(){
 }
 function setConsent(v){
   try{ document.cookie = 'vk_consent='+v+'; max-age='+(365*24*3600)+'; path=/; SameSite=Lax'; }catch(e){}
-  try{ if(v==='yes') localStorage.setItem('vk-consent','yes'); else { localStorage.removeItem('vk-consent'); localStorage.removeItem(KEY); } }catch(e){}
+  try{ if(v==='yes') localStorage.setItem('vk-consent','yes'); else { localStorage.removeItem('vk-consent'); localStorage.removeItem(OLD_KEY); for(const u in USERS) localStorage.removeItem(keyFor(u)); } }catch(e){}
 }
 
 /* ---------- fil ---------- */
 function exportData(){
-  const json = JSON.stringify({ app:'vanekurvan', version:1, exported:new Date().toISOString(), ...state }, null, 2);
+  const json = JSON.stringify({ app:'vanekurvan', version:1, user, exported:new Date().toISOString(), ...state }, null, 2);
+  const fname = 'vanekurvan-' + user + '.json';
   const inFrame = (()=>{ try{ return window.self !== window.top; }catch(e){ return true; } })();
   if(!inFrame){
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([json],{type:'application/json'}));
-    a.download = 'vanekurvan.json'; document.body.appendChild(a); a.click(); a.remove();
+    a.download = fname; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
-    toast('Sparade vanekurvan.json'); return;
+    toast('Sparade ' + fname); return;
   }
   // i previewn blockeras nedladdningar, så kopiera istället
   navigator.clipboard.writeText(json)
@@ -220,7 +276,7 @@ function importData(file){
       const s = JSON.parse(r.result);
       if(!s || !Array.isArray(s.habits) || !s.periodStart) throw 0;
       state = { fast:!!s.fast, notify:false, periodStart:s.periodStart, warned:false, habits:s.habits };
-      save(); render(); toast('Importerade ' + state.habits.length + ' grafer');
+      save(); render(); toast('Importerade ' + state.habits.length + ' grafer till ' + USERS[user]);
     }catch(e){ toast('Filen kunde inte läsas. Välj en vanekurvan.json som exporterats härifrån.'); }
   };
   r.readAsText(file);
@@ -294,6 +350,7 @@ function checkSlots(now){
 
 /* ---------- klockan (gemensam för alla grafer) ---------- */
 function tick(){
+  if(!state) return;
   const now = Date.now();
   const L = periodLen();
   let changed = checkSlots(now), missed = [];
@@ -328,6 +385,7 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.register('sw.js').then(r=>{ swReg = r; }).catch(()=>{});
 }
 function notify(title, body){
+  if(user) title = USERS[user] + ' · ' + title;
   if(state.notify && notifSupported() && Notification.permission === 'granted'){
     const opts = { body, tag: 'vanekurvan-' + title, icon: 'icon-192.png', badge: 'icon-192.png' };
     if(swReg){ swReg.showNotification(title, opts).catch(()=>{}); }
@@ -392,6 +450,9 @@ function streak(h){
 
 /* ---------- render ---------- */
 function render(){
+  if(!state) return;
+  $('userBtn').textContent = USERS[user] + ' ▾';
+  document.title = 'Vanekurvan · ' + USERS[user];
   const list = $('list');
   if(!state.habits.length){
     list.innerHTML = '<div class="empty">Inga charts än. Öppna <b>Meny</b> och lägg till en rubrik.</div>';
@@ -427,6 +488,8 @@ function render(){
 
 let pendingDelete = null;
 function renderMenu(){
+  if(!state) return;
+  document.querySelectorAll('.userrow [data-user]').forEach(b=>{ const on = b.dataset.user===user; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
   $('menuList').innerHTML = state.habits.length ? state.habits.map(h=>
     `<div class="mitem"><span>${esc(h.name)}</span><button class="del ${pendingDelete===h.id?'confirm':''}" data-del="${h.id}">${pendingDelete===h.id?'Bekräfta':'Ta bort'}</button></div>`
   ).join('') : '<p class="hint">Inga charts att ta bort.</p>';
@@ -448,7 +511,12 @@ function openMenu(o){
 $('menuBtn').onclick = ()=>openMenu(true);
 $('closeBtn').onclick = ()=>openMenu(false);
 $('scrim').onclick = ()=>openMenu(false);
-document.addEventListener('keydown', e=>{ if(e.key==='Escape') openMenu(false); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape' && state) openMenu(false); });
+$('picker').addEventListener('click', e=>{ const b = e.target.closest('[data-user]'); if(b) chooseUser(b.dataset.user); });
+document.querySelector('.userrow').addEventListener('click', e=>{
+  const b = e.target.closest('[data-user]'); if(b && b.dataset.user !== user) chooseUser(b.dataset.user);
+});
+$('userBtn').onclick = showPicker;
 
 $('addForm').addEventListener('submit', e=>{
   e.preventDefault();
@@ -484,7 +552,7 @@ $('cookieYes').onclick = ()=>{ setConsent('yes'); $('cookie').hidden = true; sav
 $('cookieNo').onclick = ()=>{ setConsent('no'); $('cookie').hidden = true; renderMenu(); toast('Inget sparas. Du kan slå på det i menyn.'); };
 if(!consent()) $('cookie').hidden = false;
 
-render();
+showPicker();
 setInterval(tick, 1000);
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) tick(); });
 })();
